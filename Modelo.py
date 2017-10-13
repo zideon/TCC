@@ -1,6 +1,45 @@
 #!/usr/bin/python
 # coding: utf-8
 
+
+class Cluster(object):
+    documento = None
+
+    def __init__(self,id=None,entradas=None,keywords=None,doc=None):
+        if doc is not None:
+            self.documento = doc
+        elif (id is not None) and (entradas is not None) and (keywords is not None):
+            entradasJson = []
+            for doc in entradas:
+                entradasJson.append(doc.documento)
+            self.documento = {'id':id,'entradas':entradasJson,"keywords":keywords}
+    def getId(self):
+        return self.documento['id']
+    def getEntradas(self):
+        entradasJson = self.documento['entradas']
+        entradas = []
+        for c in entradasJson:
+            entradas.append(EntradaCluster(doc=c))
+        return entradas
+    def getKeyWords(self):
+        return self.documento['keywords']
+
+class EntradaCluster(object):
+
+    documento = None
+
+    def __init__(self,id=None,titulo=None,texto=None,doc=None):
+        if doc is not None:
+            self.documento = doc
+        elif (id is not None) and (titulo is not None) and (texto is not None) :
+            self.documento = {'id':id,'titulo':titulo,'texto':texto}
+    def getId(self):
+        return self.documento['id']
+    def getTitulo(self):
+        return self.documento['titulo']
+    def getTexto(self):
+        return self.documento['texto']
+
 class Comentario(object):
 
     documento = None
@@ -80,7 +119,7 @@ class ClassificacaoNoticia(object):
     def getClasse(self):
         return self.documento['classe']
 
-class Entrada(object):
+class EntradaClassificador(object):
 
     documento = None
 

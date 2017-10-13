@@ -6,9 +6,11 @@ from Modelo import Noticia
 from Modelo import Classificacao
 from Modelo import Comentario
 from Modelo import ClassificacaoNoticia
-from Modelo import Entrada
+from Modelo import EntradaClassificador
+from Modelo import Cluster
 from ProcessadorTexto import Processador
 from sklearn import preprocessing
+import numpy as np
 
 class GerenciadorMongoDB(object):
 
@@ -29,9 +31,24 @@ class GerenciadorMongoDB(object):
         for i in colecao.find({}):
             noticias.append(Noticia(doc=i))
         return noticias
+
+
+    def getClusters(self,nomeBanco):
+        colecao = self.banco[nomeBanco]
+        clusters = []
+        for i in colecao.find({}):
+            clusters.append(Cluster(doc=i))
+        return clusters
+
+    def salvarModelo(self,nomeBanco,modelo):
+        colecao = self.banco[nomeBanco]
+        colecao.insert_one(modelo.documento)
+
     def getNoticiasPorIdComentario(self,nomeBanco,idComentario):
         colecao = self.banco[nomeBanco]
-        for i in colecao.find({ 'comentarios': { '$elemMatch': { 'idComentario': idComentario } } },{'titulo':1,'comentarios': { '$elemMatch': { 'idComentario': idComentario } }}):
+        for i in colecao.find(
+                {'comentarios': {'$elemMatch': {'idComentario': int(idComentario)}}}
+                ,{'titulo':1,'comentarios': {'$elemMatch': {'idComentario': int(idComentario)}}}):
             return Noticia(doc= i)
     def getClassificacoes(self,nomeBanco):
         colecao = self.banco[nomeBanco]
@@ -39,6 +56,10 @@ class GerenciadorMongoDB(object):
         for i in colecao.find({}):
             classificacoes.append(Classificacao(doc=i))
         return classificacoes
+    def getCount(self,nomeBanco,comentario,classe):
+        colecao = self.banco[nomeBanco]
+        classificacoes = []
+        return colecao.count({'classe':classe,'idComentario':int(comentario)})
     def getClasses(self,nomeBanco):
         colecao = self.banco[nomeBanco]
         return colecao.distinct('classe')
@@ -82,10 +103,33 @@ class GerenciadorMongoDB(object):
             comentarios = []
             for json in dicionario[dit]:
                 comentarios.append(Comentario(doc=json))
-            noticia = Noticia(dit,comentarios)
+            noticia = Noticia(titulo=dit,comentarios=comentarios)
             baseMongoDB.insert_one(noticia.documento)
 
 class GeradorEntradas(object):
+
+    def getMaior(self,conjunto):
+        maior = None
+        for i in conjunto:
+            if conjunto[i] > conjunto[maior]:
+                maior = i
+        return maior
+
+    def getDiferencaClassificacaoBase(self,nomeBaseNoticias, nomeBaseClassificoes):
+        gmdb = GerenciadorMongoDB()
+        classificacoes = gmdb.getClassificacoes( nomeBaseClassificoes)
+        usados = [int(i.getIdComentario()) for i in classificacoes]
+
+        ids,titulos,textos = self.getTodasEntradas( nomeBaseNoticias)
+        idsNovo =[]
+        titulosNovo = []
+        textosNovo = []
+        for i in range(len(ids)):
+            if ids[i] not in usados:
+                idsNovo.append(ids[i])
+                titulosNovo.append(titulos[i])
+                textosNovo.append(textos[i])
+        return idsNovo,titulosNovo,textosNovo
 
     def getClassificacoesNoticias(self,nomeBaseNoticias, nomeBaseClassificoes):
         gmdb = GerenciadorMongoDB()
@@ -98,20 +142,37 @@ class GeradorEntradas(object):
         label_encoder.fit(input_classes)
         for i, item in enumerate(label_encoder.classes_):
             print item, '-->', i
-
-        entradas = []
+        conjunto = {}
         for classificacao in classificacoes:
             noticia = gmdb.getNoticiasPorIdComentario(nomeBaseNoticias,classificacao.getIdComentario())
             if noticia is not None:
                 comentarios = noticia.getComentarios()
-                titulo =noticia.getTitulo()
-                texto = comentarios[0].getTexto()
-                classe = classificacao.getClasse()
-                classeTrans = label_encoder.transform([classe])
-                entradas.append(ClassificacaoNoticia(titulo,texto,classeTrans[0]))
+                if comentarios[0].getId() not in conjunto:
+                    titulo =noticia.getTitulo()
+                    texto = comentarios[0].getTexto()
+                    classe = None
+                    dict = {}
+                    sum = 0
+                    for c in classes:
+                        dict[c]= gmdb.getCount(nomeBaseClassificoes,comentarios[0].getId(),c)
+                        sum = sum + dict[c]
+                    if sum >1:
+                        classe = self.getMaior(dict)
+                    else:
+                        classe = classificacao.getClasse()
+                    classeTrans = label_encoder.transform([classe])
+                    conjunto[comentarios[0].getId()] = ClassificacaoNoticia(titulo,texto,classeTrans[0])
+        entradas = [conjunto[i] for i in conjunto]
         return entradas
 
-    def getEntradas(self,targets,nomeBaseNoticias, nomeBaseClassificoes):
+    def getXy(self,targets,nomeBaseNoticias, nomeBaseClassificoes):
+        entradas = self.getEntradasPorClassificacao(targets, nomeBaseNoticias, nomeBaseClassificoes)
+        X = [i.getInput() for i in entradas]
+        y = [i.getClasse() for i in entradas]
+        print len(entradas)
+        return X,y
+
+    def getEntradasPorClassificacao(self, targets, nomeBaseNoticias, nomeBaseClassificoes):
 
         classificacoesNoticias = self.getClassificacoesNoticias(nomeBaseNoticias, nomeBaseClassificoes)
         entradas = []
@@ -120,7 +181,30 @@ class GeradorEntradas(object):
             tituloProcessado =p.processar(cn.getTitulo())
             textoProcessado =p.processar(cn.getTexto())
             if(tituloProcessado and textoProcessado):
-                entradas.append(Entrada(tituloProcessado+" "+textoProcessado,targets[cn.getClasse()]))
+                entradas.append(EntradaClassificador(tituloProcessado + " " + textoProcessado, targets[cn.getClasse()]))
+        np.random.seed(10)
+        shuffle_indices = np.random.permutation(np.arange(len(entradas)))
+        entradas =  np.asarray(entradas)
+        entradas = entradas[shuffle_indices]
         return entradas
 
-
+    def getTodasEntradas(self,nomeBanco):
+        gmdb = GerenciadorMongoDB()
+        noticias = gmdb.getNoticias(nomeBanco)
+        print len(noticias)
+        corpus = []
+        Ids = []
+        titulos = []
+        p = Processador()
+        for i in noticias:
+            for j in i.getComentarios():
+                try:
+                    tituloProcessado = p.processar(i.getTitulo())
+                    textoProcessado = p.processar(j.getTexto())
+                    if (textoProcessado is not None) and (tituloProcessado is not None):
+                        Ids.append(j.getId())
+                        titulos.append(tituloProcessado)
+                        corpus.append(textoProcessado)
+                except Exception as e:
+                    print "erro ao processar"
+        return Ids,titulos,corpus
