@@ -28,17 +28,22 @@ class EntradaCluster(object):
 
     documento = None
 
-    def __init__(self,id=None,titulo=None,texto=None,doc=None):
+    def __init__(self,id=None,titulo=None,texto=None,classe=None,doc=None):
         if doc is not None:
             self.documento = doc
         elif (id is not None) and (titulo is not None) and (texto is not None) :
-            self.documento = {'id':id,'titulo':titulo,'texto':texto}
+            if classe is None:
+                self.documento = {'id':id,'titulo':titulo,'texto':texto}
+            else:
+                self.documento = {'id': id, 'titulo': titulo, 'texto': texto,'classe':classe}
     def getId(self):
         return self.documento['id']
     def getTitulo(self):
         return self.documento['titulo']
     def getTexto(self):
         return self.documento['texto']
+    def getClasse(self):
+        return self.documento['classe']
 
 class Comentario(object):
 
